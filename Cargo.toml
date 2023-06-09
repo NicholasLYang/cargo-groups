@@ -1,0 +1,15 @@
+[package]
+name = "dgrt"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+anyhow = { version = "1.0.71", features = ["backtrace"] }
+cargo_metadata = "0.15.4"
+clap = { version = "4.3.2", features = ["derive"] }
+globset = "0.4.10"
+serde = { version = "1.0.163", features = ["derive"] }
+toml = "0.7.4"
+which = "4.4.0"
