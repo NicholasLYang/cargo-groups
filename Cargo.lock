@@ -141,11 +141,12 @@ dependencies = [
 
 [[package]]
 name = "cargo-groups"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "cargo_metadata",
  "clap",
+ "clap-cargo",
  "globset",
  "serde",
  "toml",
@@ -201,6 +202,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "clap-cargo"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eca953650a7350560b61db95a0ab1d9c6f7b74d146a9e08fb258b834f3cf7e2c"
+dependencies = [
+ "clap",
+ "doc-comment",
+]
+
+[[package]]
 name = "clap_builder"
 version = "4.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -236,6 +247,12 @@ name = "colorchoice"
 version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "acbf1af155f9b9ef647e42cdc158db4b64a1b61f743629225fde6f3e0be2a7c7"
+
+[[package]]
+name = "doc-comment"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fea41bba32d969b513997752735605054bc0dfa92b4c56bf1189f2e174be7a10"
 
 [[package]]
 name = "either"

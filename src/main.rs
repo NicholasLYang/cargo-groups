@@ -39,6 +39,8 @@ struct Args {
     _subcommand_name: String,
     #[arg(long)]
     cwd: Option<PathBuf>,
+    #[command(flatten)]
+    manifest: clap_cargo::Manifest,
     #[command(subcommand)]
     command: Command,
 }
@@ -46,19 +48,44 @@ struct Args {
 #[derive(Parser, Debug)]
 enum Command {
     /// Test a group of crates
-    Test { group: String },
+    #[command(override_usage = "Usage: cargo groups test [OPTIONS] <GROUP>")]
+    Test {
+        group: String,
+        #[command(flatten)]
+        features: clap_cargo::Features,
+    },
     /// Build a group of crates
-    Build { group: String },
+    #[command(override_usage = "Usage: cargo groups build [OPTIONS] <GROUP>")]
+    Build {
+        group: String,
+        #[command(flatten)]
+        features: clap_cargo::Features,
+    },
     /// Check a group of crates
-    Check { group: String },
+    #[command(override_usage = "Usage: cargo groups check [OPTIONS] <GROUP>")]
+    Check {
+        group: String,
+        #[command(flatten)]
+        features: clap_cargo::Features,
+    },
     /// Run clippy on a group of crates
-    Clippy { group: String },
+    #[command(override_usage = "Usage: cargo groups clippy [OPTIONS] <GROUP>")]
+    Clippy {
+        group: String,
+        #[command(flatten)]
+        features: clap_cargo::Features,
+    },
     /// List the groups in the workspace. Add a group name to list the crates in that specific group
+    #[command(override_usage = "Usage: cargo groups list [GROUP]")]
     List { group: Option<String> },
 }
 
 impl CargoToml {
-    fn find(cwd: &Path) -> Result<PathBuf> {
+    fn find(cwd: &Path, manifest_path: &Option<PathBuf>) -> Result<PathBuf> {
+        if let Some(manifest_path) = manifest_path {
+            return Ok(manifest_path.clone());
+        }
+
         cwd.ancestors()
             .find_map(|p| p.join("Cargo.toml").exists().then(|| p.join("Cargo.toml")))
             .ok_or(anyhow::anyhow!("Cargo.toml not found"))
@@ -70,72 +97,22 @@ impl CargoToml {
     }
 }
 
-fn get_group_crates<'a>(
-    group_patterns: &[String],
-    metadata: &'a cargo_metadata::Metadata,
-) -> Result<impl Iterator<Item = &'a Package>> {
-    let mut crates_by_package = Vec::new();
-    let mut crates_by_path = Vec::new();
-    for pattern in group_patterns {
-        if let Some(path_glob) = pattern.strip_prefix("pkg:") {
-            crates_by_package.push(Glob::new(path_glob)?)
-        } else if let Some(crate_glob) = pattern.strip_prefix("path:") {
-            crates_by_path.push(Glob::new(crate_glob)?)
-        } else {
-            // By default we assume it's a crate glob, like cargo
-            crates_by_path.push(Glob::new(pattern)?)
-        }
+fn add_features(cmd: &mut process::Command, features: &clap_cargo::Features) {
+    if features.no_default_features {
+        cmd.arg("--no-default-features");
     }
 
-    let crates_by_package = Arc::new(make_glob_set(crates_by_package)?);
-    let crates_by_path = Arc::new(make_glob_set(crates_by_path)?);
-
-    Ok(metadata
-        .workspace_packages()
-        .into_iter()
-        .filter(move |package| {
-            crates_by_package.is_match(&package.name)
-                || crates_by_path
-                    .is_match(get_package_path_relative_to_workspace(package, &metadata))
-        }))
-}
-
-fn execute_on_group(cwd: &Path, subcommand: &str, group: &str) -> Result<()> {
-    let manifest_path = CargoToml::find(cwd)?;
-    let cargo_toml = CargoToml::load(&manifest_path)?;
-
-    let Some(crates) = cargo_toml.workspace.metadata.groups.get(group) else {
-        return Err(anyhow::anyhow!("Group {} not found", group));
-    };
-
-    let metadata = MetadataCommand::new().manifest_path(manifest_path).exec()?;
-
-    let cargo = which("cargo")?;
-    let mut cmd = process::Command::new(cargo);
-    cmd.current_dir(cwd).arg(subcommand);
-
-    for member in get_group_crates(crates, &metadata)? {
-        cmd.arg("-p").arg(&member.name);
+    if features.all_features {
+        cmd.arg("--all-features");
     }
 
-    info!("Running command: {:?}", cmd);
+    if !features.features.is_empty() {
+        cmd.arg("--features");
+    }
 
-    let result = cmd.spawn()?.wait()?;
-
-    process::exit(result.code().unwrap_or(1));
-}
-
-fn get_package_path_relative_to_workspace(
-    package: &Package,
-    metadata: &cargo_metadata::Metadata,
-) -> PathBuf {
-    package
-        .manifest_path
-        .strip_prefix(metadata.workspace_root.as_str())
-        .expect("package path should be child of workspace root")
-        .parent()
-        .unwrap()
-        .into()
+    for feature in &features.features {
+        cmd.arg(feature);
+    }
 }
 
 fn make_glob_set(globs: Vec<Glob>) -> Result<GlobSet> {
@@ -147,62 +124,148 @@ fn make_glob_set(globs: Vec<Glob>) -> Result<GlobSet> {
     Ok(glob_set_builder.build()?)
 }
 
-fn print_groups(cwd: &Path) -> Result<()> {
-    let cargo_toml_path = CargoToml::find(cwd)?;
-    let cargo_toml = CargoToml::load(&cargo_toml_path)?;
-    let metadata = MetadataCommand::new()
-        .manifest_path(&cargo_toml_path)
-        .exec()?;
-
-    if cargo_toml.workspace.metadata.groups.is_empty() {
-        println!("No groups found");
-        return Ok(());
-    }
-
-    for (group, crates) in cargo_toml.workspace.metadata.groups {
-        println!("[{}]", group);
-        for package in get_group_crates(&crates, &metadata)? {
-            println!("  {}", package.name);
-        }
-    }
-
-    Ok(())
+struct WorkspaceInfo {
+    cwd: PathBuf,
+    metadata: cargo_metadata::Metadata,
+    cargo_toml: CargoToml,
 }
 
-fn print_group(cwd: &Path, group: &str) -> Result<()> {
-    let cargo_toml_path = CargoToml::find(cwd)?;
-    let metadata = MetadataCommand::new()
-        .manifest_path(&cargo_toml_path)
-        .exec()?;
-    let cargo_toml = CargoToml::load(&cargo_toml_path)?;
-    let crates = cargo_toml
-        .workspace
-        .metadata
-        .groups
-        .get(group)
-        .ok_or(anyhow::anyhow!("Group {} not found", group))?;
+impl WorkspaceInfo {
+    fn from_args(args: &Args) -> Result<Self> {
+        let cwd = args.cwd.clone().unwrap_or_else(|| current_dir().unwrap());
+        let cargo_toml_path = CargoToml::find(&cwd, &args.manifest.manifest_path)?;
+        let metadata = MetadataCommand::new()
+            .manifest_path(&cargo_toml_path)
+            .exec()?;
+        let cargo_toml = CargoToml::load(&cargo_toml_path)?;
 
-    println!("[{}]", group);
-    for package in get_group_crates(crates, &metadata)? {
-        println!("  {}", package.name);
+        Ok(Self {
+            cwd,
+            metadata,
+            cargo_toml,
+        })
     }
 
-    Ok(())
+    fn print_groups(&self) -> Result<()> {
+        if self.cargo_toml.workspace.metadata.groups.is_empty() {
+            println!("No groups found");
+            return Ok(());
+        }
+
+        for (group, crates) in &self.cargo_toml.workspace.metadata.groups {
+            println!("[{}]", group);
+            for package in self.get_group_crates(&crates)? {
+                println!("  {}", package.name);
+            }
+        }
+
+        Ok(())
+    }
+
+    fn print_group(&self, group: &str) -> Result<()> {
+        let crates = self
+            .cargo_toml
+            .workspace
+            .metadata
+            .groups
+            .get(group)
+            .ok_or(anyhow::anyhow!("Group {} not found", group))?;
+
+        println!("[{}]", group);
+        for package in self.get_group_crates(crates)? {
+            println!("  {}", package.name);
+        }
+
+        Ok(())
+    }
+
+    fn get_group_crates(
+        &self,
+        group_patterns: &[String],
+    ) -> Result<impl Iterator<Item = &Package>> {
+        let mut crates_by_package = Vec::new();
+        let mut crates_by_path = Vec::new();
+        for pattern in group_patterns {
+            if let Some(path_glob) = pattern.strip_prefix("pkg:") {
+                crates_by_package.push(Glob::new(path_glob)?)
+            } else if let Some(crate_glob) = pattern.strip_prefix("path:") {
+                crates_by_path.push(Glob::new(crate_glob)?)
+            } else {
+                // By default we assume it's a crate glob, like cargo
+                crates_by_path.push(Glob::new(pattern)?)
+            }
+        }
+
+        let crates_by_package = Arc::new(make_glob_set(crates_by_package)?);
+        let crates_by_path = Arc::new(make_glob_set(crates_by_path)?);
+
+        Ok(self
+            .metadata
+            .workspace_packages()
+            .into_iter()
+            .filter(move |package| {
+                crates_by_package.is_match(&package.name)
+                    || crates_by_path.is_match(self.get_package_path_relative_to_workspace(package))
+            }))
+    }
+
+    fn get_package_path_relative_to_workspace(&self, package: &Package) -> PathBuf {
+        package
+            .manifest_path
+            .strip_prefix(self.metadata.workspace_root.as_str())
+            .expect("package path should be child of workspace root")
+            .parent()
+            .unwrap()
+            .into()
+    }
+
+    fn execute_on_group(
+        &self,
+        subcommand: &str,
+        group: &str,
+        features: clap_cargo::Features,
+    ) -> Result<()> {
+        let Some(crates) = self.cargo_toml.workspace.metadata.groups.get(group) else {
+            return Err(anyhow::anyhow!("Group {} not found", group));
+        };
+
+        let cargo = which("cargo")?;
+        let mut cmd = process::Command::new(cargo);
+        cmd.current_dir(&self.cwd).arg(subcommand);
+        add_features(&mut cmd, &features);
+
+        for member in self.get_group_crates(crates)? {
+            cmd.arg("-p").arg(&member.name);
+        }
+
+        info!("Running command: {:?}", cmd);
+
+        let result = cmd.spawn()?.wait()?;
+
+        process::exit(result.code().unwrap_or(1));
+    }
 }
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
-
-    let cwd = args.cwd.unwrap_or_else(|| current_dir().unwrap());
+    let workspace_info = WorkspaceInfo::from_args(&args)?;
 
     match args.command {
-        Command::Test { group } => execute_on_group(&cwd, "test", &group)?,
-        Command::Build { group } => execute_on_group(&cwd, "build", &group)?,
-        Command::Check { group } => execute_on_group(&cwd, "check", &group)?,
-        Command::Clippy { group } => execute_on_group(&cwd, "clippy", &group)?,
-        Command::List { group: None } => print_groups(&cwd)?,
-        Command::List { group: Some(group) } => print_group(&cwd, &group)?,
+        Command::Test { group, features } => {
+            workspace_info.execute_on_group("test", &group, features)?
+        }
+        Command::Build { group, features } => {
+            workspace_info.execute_on_group("build", &group, features)?
+        }
+        Command::Check { group, features } => {
+            workspace_info.execute_on_group("check", &group, features)?
+        }
+        Command::Clippy { group, features } => {
+            workspace_info.execute_on_group("clippy", &group, features)?
+        }
+        Command::List { group: None } => workspace_info.print_groups()?,
+        Command::List { group: Some(group) } => workspace_info.print_group(&group)?,
     };
 
     Ok(())
