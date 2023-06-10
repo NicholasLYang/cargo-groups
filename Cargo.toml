@@ -3,6 +3,8 @@ name = "cargo-groups"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
+authors = ["Nicholas Yang"]
+description = "Run cargo commands on a groups of crates in a workspace"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
