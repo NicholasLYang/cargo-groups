@@ -5,6 +5,9 @@ edition = "2021"
 license = "MIT"
 authors = ["Nicholas Yang"]
 description = "Run cargo commands on a groups of crates in a workspace"
+homepage = "https://github.com/nicholaslyang/cargo-groups"
+repository = "https://github.com/nicholaslyang/cargo-groups"
+keywords = ["cargo", "workspace", "groups", "crates"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
