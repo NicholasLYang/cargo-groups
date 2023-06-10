@@ -8,6 +8,7 @@ use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{fs, process};
+use tracing::info;
 use which::which;
 
 #[derive(Deserialize)]
@@ -30,9 +31,12 @@ struct Metadata {
 #[command(
     author,
     version,
-    about = "Run cargo commands on a group of crates in a workspace"
+    about = "Run cargo commands on a group of crates in a workspace",
+    override_usage = "Usage: cargo groups [OPTIONS] <COMMAND>"
 )]
+#[clap(bin_name = "cargo")]
 struct Args {
+    _subcommand_name: String,
     #[arg(long)]
     cwd: Option<PathBuf>,
     #[command(subcommand)]
@@ -114,7 +118,7 @@ fn execute_on_group(cwd: &Path, subcommand: &str, group: &str) -> Result<()> {
         cmd.arg("-p").arg(&member.name);
     }
 
-    println!("Running command: {:?}", cmd);
+    info!("Running command: {:?}", cmd);
 
     let result = cmd.spawn()?.wait()?;
 
@@ -150,6 +154,11 @@ fn print_groups(cwd: &Path) -> Result<()> {
         .manifest_path(&cargo_toml_path)
         .exec()?;
 
+    if cargo_toml.workspace.metadata.groups.is_empty() {
+        println!("No groups found");
+        return Ok(());
+    }
+
     for (group, crates) in cargo_toml.workspace.metadata.groups {
         println!("[{}]", group);
         for package in get_group_crates(&crates, &metadata)? {
@@ -182,6 +191,7 @@ fn print_group(cwd: &Path, group: &str) -> Result<()> {
 }
 
 fn main() -> Result<()> {
+    tracing_subscriber::fmt::init();
     let args = Args::parse();
 
     let cwd = args.cwd.unwrap_or_else(|| current_dir().unwrap());
