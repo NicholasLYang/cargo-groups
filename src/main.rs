@@ -41,10 +41,15 @@ struct Args {
 
 #[derive(Parser, Debug)]
 enum Command {
-    Run { group: String },
+    /// Test a group of crates
     Test { group: String },
+    /// Build a group of crates
     Build { group: String },
+    /// Check a group of crates
     Check { group: String },
+    /// Run clippy on a group of crates
+    Clippy { group: String },
+    /// List the groups in the workspace. Add a group name to list the crates in that specific group
     List { group: Option<String> },
 }
 
@@ -182,10 +187,10 @@ fn main() -> Result<()> {
     let cwd = args.cwd.unwrap_or_else(|| current_dir().unwrap());
 
     match args.command {
-        Command::Run { group } => execute_on_group(&cwd, "run", &group)?,
         Command::Test { group } => execute_on_group(&cwd, "test", &group)?,
         Command::Build { group } => execute_on_group(&cwd, "build", &group)?,
         Command::Check { group } => execute_on_group(&cwd, "check", &group)?,
+        Command::Clippy { group } => execute_on_group(&cwd, "clippy", &group)?,
         Command::List { group: None } => print_groups(&cwd)?,
         Command::List { group: Some(group) } => print_group(&cwd, &group)?,
     };
