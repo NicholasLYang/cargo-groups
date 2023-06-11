@@ -16,6 +16,7 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 cargo_metadata = "0.15.4"
 clap = { version = "4.3.2", features = ["derive"] }
 clap-cargo = "0.10.0"
+colored = "2.0.0"
 globset = "0.4.10"
 serde = { version = "1.0.163", features = ["derive"] }
 toml = "0.7.4"

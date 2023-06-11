@@ -1,6 +1,7 @@
 use anyhow::Result;
 use cargo_metadata::{MetadataCommand, Package};
 use clap::Parser;
+use colored::*;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -168,6 +169,8 @@ impl WorkspaceInfo {
             package.name,
             self.get_package_path_relative_to_workspace(&package)
                 .display()
+                .to_string()
+                .dimmed()
         );
     }
 
