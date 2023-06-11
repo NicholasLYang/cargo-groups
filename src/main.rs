@@ -155,11 +155,20 @@ impl WorkspaceInfo {
         for (group, crates) in &self.cargo_toml.workspace.metadata.groups {
             println!("[{}]", group);
             for package in self.get_group_crates(&crates)? {
-                println!("  {}", package.name);
+                self.print_package(package);
             }
         }
 
         Ok(())
+    }
+
+    fn print_package(&self, package: &Package) {
+        println!(
+            "  {} {}",
+            package.name,
+            self.get_package_path_relative_to_workspace(&package)
+                .display()
+        );
     }
 
     fn print_group(&self, group: &str) -> Result<()> {
@@ -173,7 +182,7 @@ impl WorkspaceInfo {
 
         println!("[{}]", group);
         for package in self.get_group_crates(crates)? {
-            println!("  {}", package.name);
+            self.print_package(package);
         }
 
         Ok(())
