@@ -28,6 +28,13 @@ struct Metadata {
     groups: HashMap<String, Vec<String>>,
 }
 
+// Common flags like --release
+#[derive(Parser, Debug)]
+struct CommandOptions {
+    #[arg(long)]
+    release: bool,
+}
+
 #[derive(Parser, Debug)]
 #[command(
     author,
@@ -54,6 +61,8 @@ enum Command {
         group: String,
         #[command(flatten)]
         features: clap_cargo::Features,
+        #[command(flatten)]
+        options: CommandOptions,
     },
     /// Build a group of crates
     #[command(override_usage = "Usage: cargo groups build [OPTIONS] <GROUP>")]
@@ -61,6 +70,8 @@ enum Command {
         group: String,
         #[command(flatten)]
         features: clap_cargo::Features,
+        #[command(flatten)]
+        options: CommandOptions,
     },
     /// Check a group of crates
     #[command(override_usage = "Usage: cargo groups check [OPTIONS] <GROUP>")]
@@ -68,6 +79,8 @@ enum Command {
         group: String,
         #[command(flatten)]
         features: clap_cargo::Features,
+        #[command(flatten)]
+        options: CommandOptions,
     },
     /// Run clippy on a group of crates
     #[command(override_usage = "Usage: cargo groups clippy [OPTIONS] <GROUP>")]
@@ -75,6 +88,8 @@ enum Command {
         group: String,
         #[command(flatten)]
         features: clap_cargo::Features,
+        #[command(flatten)]
+        options: CommandOptions,
     },
     /// List the groups in the workspace. Add a group name to list the crates in that specific group
     #[command(override_usage = "Usage: cargo groups list [GROUP]")]
@@ -95,6 +110,12 @@ impl CargoToml {
     fn load(manifest_path: &Path) -> Result<Self> {
         let cargo_toml_contents = fs::read_to_string(&manifest_path)?;
         Ok(toml::from_str::<CargoToml>(&cargo_toml_contents)?)
+    }
+}
+
+fn add_options(cmd: &mut process::Command, options: &CommandOptions) {
+    if options.release {
+        cmd.arg("--release");
     }
 }
 
@@ -236,6 +257,7 @@ impl WorkspaceInfo {
         subcommand: &str,
         group: &str,
         features: clap_cargo::Features,
+        options: CommandOptions,
     ) -> Result<()> {
         let Some(crates) = self.cargo_toml.workspace.metadata.groups.get(group) else {
             return Err(anyhow::anyhow!("Group {} not found", group));
@@ -245,6 +267,7 @@ impl WorkspaceInfo {
         let mut cmd = process::Command::new(cargo);
         cmd.current_dir(&self.cwd).arg(subcommand);
         add_features(&mut cmd, &features);
+        add_options(&mut cmd, &options);
 
         for member in self.get_group_crates(crates)? {
             cmd.arg("-p").arg(&member.name);
@@ -264,18 +287,26 @@ fn main() -> Result<()> {
     let workspace_info = WorkspaceInfo::from_args(&args)?;
 
     match args.command {
-        Command::Test { group, features } => {
-            workspace_info.execute_on_group("test", &group, features)?
-        }
-        Command::Build { group, features } => {
-            workspace_info.execute_on_group("build", &group, features)?
-        }
-        Command::Check { group, features } => {
-            workspace_info.execute_on_group("check", &group, features)?
-        }
-        Command::Clippy { group, features } => {
-            workspace_info.execute_on_group("clippy", &group, features)?
-        }
+        Command::Test {
+            group,
+            features,
+            options,
+        } => workspace_info.execute_on_group("test", &group, features, options)?,
+        Command::Build {
+            group,
+            features,
+            options,
+        } => workspace_info.execute_on_group("build", &group, features, options)?,
+        Command::Check {
+            group,
+            features,
+            options,
+        } => workspace_info.execute_on_group("check", &group, features, options)?,
+        Command::Clippy {
+            group,
+            features,
+            options,
+        } => workspace_info.execute_on_group("clippy", &group, features, options)?,
         Command::List { group: None } => workspace_info.print_groups()?,
         Command::List { group: Some(group) } => workspace_info.print_group(&group)?,
     };
