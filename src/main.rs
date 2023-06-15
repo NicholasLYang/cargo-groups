@@ -13,7 +13,7 @@ use tracing::info;
 use which::which;
 
 #[derive(Deserialize)]
-struct CargoToml {
+struct RootCargoToml {
     #[serde(default)]
     workspace: Workspace,
 }
@@ -96,7 +96,7 @@ enum Command {
     List { group: Option<String> },
 }
 
-impl CargoToml {
+impl RootCargoToml {
     fn find(cwd: &Path, manifest_path: &Option<PathBuf>) -> Result<PathBuf> {
         if let Some(manifest_path) = manifest_path {
             return Ok(manifest_path.clone());
@@ -109,7 +109,7 @@ impl CargoToml {
 
     fn load(manifest_path: &Path) -> Result<Self> {
         let cargo_toml_contents = fs::read_to_string(&manifest_path)?;
-        Ok(toml::from_str::<CargoToml>(&cargo_toml_contents)?)
+        Ok(toml::from_str::<RootCargoToml>(&cargo_toml_contents)?)
     }
 }
 
@@ -149,17 +149,17 @@ fn make_glob_set(globs: Vec<Glob>) -> Result<GlobSet> {
 struct WorkspaceInfo {
     cwd: PathBuf,
     metadata: cargo_metadata::Metadata,
-    cargo_toml: CargoToml,
+    cargo_toml: RootCargoToml,
 }
 
 impl WorkspaceInfo {
     fn from_args(args: &Args) -> Result<Self> {
         let cwd = args.cwd.clone().unwrap_or_else(|| current_dir().unwrap());
-        let cargo_toml_path = CargoToml::find(&cwd, &args.manifest.manifest_path)?;
+        let cargo_toml_path = RootCargoToml::find(&cwd, &args.manifest.manifest_path)?;
         let metadata = MetadataCommand::new()
             .manifest_path(&cargo_toml_path)
             .exec()?;
-        let cargo_toml = CargoToml::load(&cargo_toml_path)?;
+        let cargo_toml = RootCargoToml::load(&cargo_toml_path)?;
 
         Ok(Self {
             cwd,
@@ -232,14 +232,35 @@ impl WorkspaceInfo {
         let crates_by_package = Arc::new(make_glob_set(crates_by_package)?);
         let crates_by_path = Arc::new(make_glob_set(crates_by_path)?);
 
-        Ok(self
+        // Filter by the globs
+        let packages_iter = self
             .metadata
             .workspace_packages()
             .into_iter()
             .filter(move |package| {
                 crates_by_package.is_match(&package.name)
                     || crates_by_path.is_match(self.get_package_path_relative_to_workspace(package))
-            }))
+            });
+
+        // Then build a map of the packages that we want to build
+        let mut packages: HashMap<_, _> = packages_iter
+            .clone()
+            .map(|package| (package.name.clone(), package))
+            .collect();
+
+        // Then iterate through packages and remove dependent packages,
+        // i.e. if package A depends on package B, we don't need to actively
+        // build package B. This is important because if another package C depends
+        // on a different version of B, we'll get a build error.
+        for package in packages_iter {
+            for dependency in package.dependencies.clone() {
+                if packages.contains_key(&dependency.name) {
+                    packages.remove(&dependency.name);
+                }
+            }
+        }
+
+        Ok(packages.into_iter().map(|(_, package)| package))
     }
 
     fn get_package_path_relative_to_workspace(&self, package: &Package) -> PathBuf {
