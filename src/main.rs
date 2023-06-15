@@ -176,7 +176,7 @@ impl WorkspaceInfo {
 
         for (group, crates) in &self.cargo_toml.workspace.metadata.groups {
             println!("[{}]", group);
-            for package in self.get_group_crates(&crates)? {
+            for package in self.get_group_crates(&crates, false)? {
                 self.print_package(package);
             }
         }
@@ -205,7 +205,7 @@ impl WorkspaceInfo {
             .ok_or(anyhow::anyhow!("Group {} not found", group))?;
 
         println!("[{}]", group);
-        for package in self.get_group_crates(crates)? {
+        for package in self.get_group_crates(crates, false)? {
             self.print_package(package);
         }
 
@@ -215,7 +215,8 @@ impl WorkspaceInfo {
     fn get_group_crates(
         &self,
         group_patterns: &[String],
-    ) -> Result<impl Iterator<Item = &Package>> {
+        only_run_top_level: bool,
+    ) -> Result<Vec<&Package>> {
         let mut crates_by_package = Vec::new();
         let mut crates_by_path = Vec::new();
         for pattern in group_patterns {
@@ -232,7 +233,6 @@ impl WorkspaceInfo {
         let crates_by_package = Arc::new(make_glob_set(crates_by_package)?);
         let crates_by_path = Arc::new(make_glob_set(crates_by_path)?);
 
-        // Filter by the globs
         let packages_iter = self
             .metadata
             .workspace_packages()
@@ -242,25 +242,29 @@ impl WorkspaceInfo {
                     || crates_by_path.is_match(self.get_package_path_relative_to_workspace(package))
             });
 
-        // Then build a map of the packages that we want to build
-        let mut packages: HashMap<_, _> = packages_iter
-            .clone()
-            .map(|package| (package.name.clone(), package))
-            .collect();
+        if only_run_top_level {
+            // Then build a map of the packages that we want to build
+            let mut packages: HashMap<_, _> = packages_iter
+                .clone()
+                .map(|package| (package.name.clone(), package))
+                .collect();
 
-        // Then iterate through packages and remove dependent packages,
-        // i.e. if package A depends on package B, we don't need to actively
-        // build package B. This is important because if another package C depends
-        // on a different version of B, we'll get a build error.
-        for package in packages_iter {
-            for dependency in package.dependencies.clone() {
-                if packages.contains_key(&dependency.name) {
-                    packages.remove(&dependency.name);
+            // Then iterate through packages and remove dependent packages,
+            // i.e. if package A depends on package B, we don't need to actively
+            // build package B. This is important because if another package C depends
+            // on a different version of B, we'll get a build error.
+            for package in packages_iter {
+                for dependency in package.dependencies.clone() {
+                    if packages.contains_key(&dependency.name) {
+                        packages.remove(&dependency.name);
+                    }
                 }
             }
-        }
 
-        Ok(packages.into_iter().map(|(_, package)| package))
+            Ok(packages.into_iter().map(|(_, package)| package).collect())
+        } else {
+            Ok(packages_iter.collect())
+        }
     }
 
     fn get_package_path_relative_to_workspace(&self, package: &Package) -> PathBuf {
@@ -279,6 +283,7 @@ impl WorkspaceInfo {
         group: &str,
         features: clap_cargo::Features,
         options: CommandOptions,
+        only_run_top_level: bool,
     ) -> Result<()> {
         let Some(crates) = self.cargo_toml.workspace.metadata.groups.get(group) else {
             return Err(anyhow::anyhow!("Group {} not found", group));
@@ -290,7 +295,7 @@ impl WorkspaceInfo {
         add_features(&mut cmd, &features);
         add_options(&mut cmd, &options);
 
-        for member in self.get_group_crates(crates)? {
+        for member in self.get_group_crates(crates, only_run_top_level)? {
             cmd.arg("-p").arg(&member.name);
         }
 
@@ -312,22 +317,22 @@ fn main() -> Result<()> {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("test", &group, features, options)?,
+        } => workspace_info.execute_on_group("test", &group, features, options, false)?,
         Command::Build {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("build", &group, features, options)?,
+        } => workspace_info.execute_on_group("build", &group, features, options, true)?,
         Command::Check {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("check", &group, features, options)?,
+        } => workspace_info.execute_on_group("check", &group, features, options, true)?,
         Command::Clippy {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("clippy", &group, features, options)?,
+        } => workspace_info.execute_on_group("clippy", &group, features, options, true)?,
         Command::List { group: None } => workspace_info.print_groups()?,
         Command::List { group: Some(group) } => workspace_info.print_group(&group)?,
     };
