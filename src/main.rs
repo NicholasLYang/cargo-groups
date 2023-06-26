@@ -283,6 +283,11 @@ impl WorkspaceInfo {
         group: &str,
         features: clap_cargo::Features,
         options: CommandOptions,
+        // Only run the top level packages, i.e. don't run dependencies
+        // useful for commands like `cargo check` where the dependencies
+        // are checked as part of the top level package, but not so useful
+        // for commands like `cargo test` where the dependencies' tests are
+        // not run.
         only_run_top_level: bool,
     ) -> Result<()> {
         let Some(crates) = self.cargo_toml.workspace.metadata.groups.get(group) else {
