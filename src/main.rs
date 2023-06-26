@@ -1,6 +1,6 @@
 use anyhow::Result;
 use cargo_metadata::{MetadataCommand, Package};
-use clap::Parser;
+use clap::{Args as ClapArgs, Parser};
 use colored::*;
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use serde::Deserialize;
@@ -28,11 +28,54 @@ struct Metadata {
     groups: HashMap<String, Vec<String>>,
 }
 
+trait Options {
+    fn add_to_command(&self, _cmd: &mut process::Command) {}
+}
+
 // Common flags like --release
 #[derive(Parser, Debug)]
-struct CommandOptions {
+struct CommandOptions<Specific = DefaultSpecificOptions>
+where
+    Specific: Parser + ClapArgs,
+{
     #[arg(long)]
     release: bool,
+    #[command(flatten)]
+    specific: Specific,
+}
+
+impl<T> Options for CommandOptions<T>
+where
+    T: Options + Parser + ClapArgs,
+{
+    fn add_to_command(&self, cmd: &mut process::Command) {
+        let Self { release, specific } = self;
+        if *release {
+            cmd.arg("--release");
+        }
+        specific.add_to_command(cmd);
+    }
+}
+
+#[derive(Parser, Debug)]
+struct DefaultSpecificOptions;
+
+impl Options for DefaultSpecificOptions {}
+
+// Clippy-specific flags like --fix
+#[derive(Parser, Debug)]
+struct ClippyOptions {
+    #[arg(long)]
+    fix: bool,
+}
+
+impl Options for ClippyOptions {
+    fn add_to_command(&self, cmd: &mut process::Command) {
+        let Self { fix } = self;
+        if *fix {
+            cmd.arg("--fix");
+        }
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -89,7 +132,7 @@ enum Command {
         #[command(flatten)]
         features: clap_cargo::Features,
         #[command(flatten)]
-        options: CommandOptions,
+        options: CommandOptions<ClippyOptions>,
     },
     /// List the groups in the workspace. Add a group name to list the crates in that specific group
     #[command(override_usage = "Usage: cargo groups list [GROUP]")]
@@ -110,12 +153,6 @@ impl RootCargoToml {
     fn load(manifest_path: &Path) -> Result<Self> {
         let cargo_toml_contents = fs::read_to_string(&manifest_path)?;
         Ok(toml::from_str::<RootCargoToml>(&cargo_toml_contents)?)
-    }
-}
-
-fn add_options(cmd: &mut process::Command, options: &CommandOptions) {
-    if options.release {
-        cmd.arg("--release");
     }
 }
 
@@ -277,19 +314,22 @@ impl WorkspaceInfo {
             .into()
     }
 
-    fn execute_on_group(
+    fn execute_on_group<T>(
         &self,
         subcommand: &str,
         group: &str,
         features: clap_cargo::Features,
-        options: CommandOptions,
+        options: T,
         // Only run the top level packages, i.e. don't run dependencies
         // useful for commands like `cargo check` where the dependencies
         // are checked as part of the top level package, but not so useful
         // for commands like `cargo test` where the dependencies' tests are
         // not run.
         only_run_top_level: bool,
-    ) -> Result<()> {
+    ) -> Result<()>
+    where
+        T: Options,
+    {
         let Some(crates) = self.cargo_toml.workspace.metadata.groups.get(group) else {
             return Err(anyhow::anyhow!("Group {} not found", group));
         };
@@ -298,7 +338,7 @@ impl WorkspaceInfo {
         let mut cmd = process::Command::new(cargo);
         cmd.current_dir(&self.cwd).arg(subcommand);
         add_features(&mut cmd, &features);
-        add_options(&mut cmd, &options);
+        options.add_to_command(&mut cmd);
 
         for member in self.get_group_crates(crates, only_run_top_level)? {
             cmd.arg("-p").arg(&member.name);
