@@ -69,16 +69,28 @@ struct ClippyOptions {
     fix: bool,
     #[arg(long)]
     allow_dirty: bool,
+    #[arg(trailing_var_arg = true)]
+    pass_through_args: Vec<String>,
 }
 
 impl Options for ClippyOptions {
     fn add_to_command(&self, cmd: &mut process::Command) {
-        let Self { fix, allow_dirty } = self;
+        let Self {
+            fix,
+            allow_dirty,
+            pass_through_args,
+        } = self;
         if *fix {
             cmd.arg("--fix");
         }
         if *allow_dirty {
             cmd.arg("--allow-dirty");
+        }
+        if !pass_through_args.is_empty() {
+            cmd.arg("--");
+        }
+        for arg in pass_through_args {
+            cmd.arg(arg);
         }
     }
 }
@@ -343,11 +355,11 @@ impl WorkspaceInfo {
         let mut cmd = process::Command::new(cargo);
         cmd.current_dir(&self.cwd).arg(subcommand);
         add_features(&mut cmd, &features);
-        options.add_to_command(&mut cmd);
-
         for member in self.get_group_crates(crates, only_run_top_level)? {
             cmd.arg("-p").arg(&member.name);
         }
+
+        options.add_to_command(&mut cmd);
 
         info!("Running command: {:?}", cmd);
 
