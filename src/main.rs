@@ -67,13 +67,18 @@ impl Options for DefaultSpecificOptions {}
 struct ClippyOptions {
     #[arg(long)]
     fix: bool,
+    #[arg(long)]
+    allow_dirty: bool,
 }
 
 impl Options for ClippyOptions {
     fn add_to_command(&self, cmd: &mut process::Command) {
-        let Self { fix } = self;
+        let Self { fix, allow_dirty } = self;
         if *fix {
             cmd.arg("--fix");
+        }
+        if *allow_dirty {
+            cmd.arg("--allow-dirty");
         }
     }
 }
