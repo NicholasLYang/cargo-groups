@@ -126,7 +126,7 @@ dependencies = [
 
 [[package]]
 name = "cargo-groups"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "anyhow",
  "cargo_metadata",
