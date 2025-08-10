@@ -42,6 +42,8 @@ where
     release: bool,
     #[command(flatten)]
     specific: Specific,
+    #[arg(last = true)]
+    cargo_args: Vec<String>,
 }
 
 impl<T> Options for CommandOptions<T>
@@ -49,11 +51,18 @@ where
     T: Options + Parser + ClapArgs,
 {
     fn add_to_command(&self, cmd: &mut process::Command) {
-        let Self { release, specific } = self;
+        let Self {
+            release,
+            specific,
+            cargo_args,
+        } = self;
         if *release {
             cmd.arg("--release");
         }
         specific.add_to_command(cmd);
+        for arg in cargo_args {
+            cmd.arg(arg);
+        }
     }
 }
 
