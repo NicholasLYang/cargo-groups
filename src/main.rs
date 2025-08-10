@@ -3,8 +3,9 @@ use cargo_metadata::{MetadataCommand, Package};
 use clap::{Args as ClapArgs, Parser};
 use colored::*;
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use itertools::Itertools;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::env::current_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -25,7 +26,7 @@ struct Workspace {
 
 #[derive(Default, Deserialize)]
 struct Metadata {
-    groups: HashMap<String, Vec<String>>,
+    groups: BTreeMap<String, Vec<String>>,
 }
 
 trait Options {
@@ -113,9 +114,10 @@ impl Options for ClippyOptions {
 )]
 #[clap(bin_name = "cargo")]
 struct Args {
-    _subcommand_name: String,
     #[arg(long)]
     cwd: Option<PathBuf>,
+    #[arg(long)]
+    dry_run: bool,
     #[command(flatten)]
     manifest: clap_cargo::Manifest,
     #[command(subcommand)]
@@ -237,7 +239,14 @@ impl WorkspaceInfo {
             return Ok(());
         }
 
-        for (group, crates) in &self.cargo_toml.workspace.metadata.groups {
+        for (group, crates) in self
+            .cargo_toml
+            .workspace
+            .metadata
+            .groups
+            .iter()
+            .sorted_by(|(a, _), (b, _)| a.cmp(b))
+        {
             println!("[{}]", group);
             for package in self.get_group_crates(&crates, false)? {
                 self.print_package(package);
@@ -346,6 +355,7 @@ impl WorkspaceInfo {
         group: &str,
         features: clap_cargo::Features,
         options: T,
+        dry_run: bool,
         // Only run the top level packages, i.e. don't run dependencies
         // useful for commands like `cargo check` where the dependencies
         // are checked as part of the top level package, but not so useful
@@ -372,9 +382,15 @@ impl WorkspaceInfo {
 
         info!("Running command: {:?}", cmd);
 
-        let result = cmd.spawn()?.wait()?;
+        if dry_run {
+            println!("{} {}", "Command:".bold(), format!("{:?}", cmd).dimmed());
 
-        process::exit(result.code().unwrap_or(1));
+            Ok(())
+        } else {
+            let result = cmd.spawn()?.wait()?;
+
+            process::exit(result.code().unwrap_or(1));
+        }
     }
 }
 
@@ -388,25 +404,116 @@ fn main() -> Result<()> {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("test", &group, features, options, false)?,
+        } => workspace_info.execute_on_group(
+            "test",
+            &group,
+            features,
+            options,
+            args.dry_run,
+            false,
+        )?,
         Command::Build {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("build", &group, features, options, true)?,
+        } => workspace_info.execute_on_group(
+            "build",
+            &group,
+            features,
+            options,
+            args.dry_run,
+            true,
+        )?,
         Command::Check {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("check", &group, features, options, true)?,
+        } => workspace_info.execute_on_group(
+            "check",
+            &group,
+            features,
+            options,
+            args.dry_run,
+            true,
+        )?,
         Command::Clippy {
             group,
             features,
             options,
-        } => workspace_info.execute_on_group("clippy", &group, features, options, true)?,
+        } => workspace_info.execute_on_group(
+            "clippy",
+            &group,
+            features,
+            options,
+            args.dry_run,
+            true,
+        )?,
         Command::List { group: None } => workspace_info.print_groups()?,
         Command::List { group: Some(group) } => workspace_info.print_group(&group)?,
     };
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use insta_cmd::{assert_cmd_snapshot, get_cargo_bin};
+
+    #[test]
+    fn test_list() -> Result<(), anyhow::Error> {
+        assert_cmd_snapshot!(
+            process::Command::new(get_cargo_bin("cargo-groups"))
+                .arg("--cwd")
+                .arg("fixtures/monorepo")
+                .arg("list")
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_check() -> Result<(), anyhow::Error> {
+        // Verify that we only run the top level packages
+        insta::with_settings!({filters => vec![(r#"&& \".*cargo\""#, "&& [cargo]")]}, {
+            assert_cmd_snapshot!(
+                process::Command::new(get_cargo_bin("cargo-groups"))
+                .arg("--cwd")
+                .arg("fixtures/monorepo")
+                .arg("--dry-run")
+                .arg("check")
+                .arg("libraries")
+            );
+
+            assert_cmd_snapshot!(
+                process::Command::new(get_cargo_bin("cargo-groups"))
+                  .arg("--cwd")
+                  .arg("fixtures/monorepo")
+                  .arg("--dry-run")
+                  .arg("check")
+                  .arg("libraries")
+                  .arg("--")
+                  .arg("--timings")
+            );
+        });
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_test() -> Result<(), anyhow::Error> {
+        insta::with_settings!({filters => vec![(r#"&& \".*cargo\""#, "&& [cargo]")]}, {
+            // With test, we should run all the packages, not just the top level ones
+            assert_cmd_snapshot!(
+                process::Command::new(get_cargo_bin("cargo-groups"))
+                .arg("--cwd")
+                .arg("fixtures/monorepo")
+                .arg("--dry-run")
+                .arg("test")
+                .arg("libraries")
+            );
+        });
+
+        Ok(())
+    }
 }

@@ -1,0 +1,20 @@
+---
+source: src/main.rs
+info:
+  program: cargo-groups
+  args:
+    - "--cwd"
+    - fixtures/monorepo
+    - list
+---
+success: true
+exit_code: 0
+----- stdout -----
+[binaries]
+  my-exe crates/my-exe
+  my-other-exe crates/my-other-exe
+[libraries]
+  my-lib crates/my-lib
+  my-other-lib crates/my-other-lib
+
+----- stderr -----

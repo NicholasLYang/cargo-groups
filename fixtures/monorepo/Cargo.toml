@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.metadata.groups]
+libraries = ["crates/my-lib", "crates/my-other-lib"]
+binaries = ["crates/my-exe", "crates/my-other-exe"]
+
