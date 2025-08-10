@@ -1,0 +1,17 @@
+---
+source: src/main.rs
+info:
+  program: cargo-groups
+  args:
+    - "--cwd"
+    - fixtures/monorepo
+    - "--dry-run"
+    - test
+    - libraries
+---
+success: true
+exit_code: 0
+----- stdout -----
+Command: cd "fixtures/monorepo" && [cargo] "test" "-p" "my-lib" "-p" "my-other-lib"
+
+----- stderr -----

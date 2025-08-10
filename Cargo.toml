@@ -16,7 +16,7 @@ unix-archive = ".tar.gz"
 [package]
 name = "cargo-groups"
 version = "0.1.9"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 authors = ["Nicholas Yang"]
 description = "Run cargo commands on a groups of crates in a workspace"
@@ -33,6 +33,9 @@ clap = { version = "4.3.2", features = ["derive"] }
 clap-cargo = "0.10.0"
 colored = "2.0.0"
 globset = "0.4.10"
+insta = { version = "1.43.1", features = ["filters"] }
+insta-cmd = "0.6.0"
+itertools = "0.14.0"
 serde = { version = "1.0.163", features = ["derive"] }
 toml = "0.7.4"
 tracing = "0.1.37"
